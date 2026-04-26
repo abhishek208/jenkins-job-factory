@@ -1,3 +1,7 @@
+// ===============================
+// seed.groovy
+// ===============================
+
 @Library('platform-lib') _
 
 import platform.GitHub
@@ -6,98 +10,78 @@ pipeline {
     agent any
 
     parameters {
-        string(name: 'BRANCH', defaultValue: 'main')
-        choice(name: 'TARGET_ENV', choices: ['dev', 'workflow', 'all'], description: 'Which env to generate')
-    }
-
-    environment {
-        REPO_NAME = "${env.JOB_NAME.split('/')[0]}"
-        REPO_URL  = GitHub.repoUrl("${env.JOB_NAME.split('/')[0]}")
+        string(
+            name: 'REPO_NAME',
+            description: 'GitHub repository name (example: sample-service)'
+        )
     }
 
     stages {
 
-        stage('Checkout') {
-            steps {
-                git branch: "${params.BRANCH}", url: "${REPO_URL}"
-            }
-        }
-
-        stage('Validate Workflow') {
+        stage('Validate Input') {
             steps {
                 script {
-                    if (!fileExists("automation/workflow.yaml")) {
-                        error "workflow.yaml not found"
+                    if (!params.REPO_NAME?.trim()) {
+                        error "REPO_NAME is required"
                     }
+
+                    echo "Bootstrapping repository: ${params.REPO_NAME}"
                 }
             }
         }
 
-        stage('Generate Jobs') {
+        stage('Create Folder + AutoGen Job') {
             steps {
                 script {
 
-                    def config = readYaml file: 'automation/workflow.yaml'
+                    def repo = params.REPO_NAME
+                    def repoUrl = GitHub.repoUrl(repo)
 
-                    def dsl = ""
+                    def dsl = """
+folder('${repo}')
 
-                    config.jobs.each { job ->
+pipelineJob('${repo}/AutoGen') {
+    description('AutoGen job for ${repo}')
 
-                        def scriptFile = "automation/${job.file}"
-
-                        if (!fileExists(scriptFile)) {
-                            echo "Skipping ${job.name}"
-                            return
-                        }
-
-                        def scriptContent = readFile(scriptFile)
-
-                        // -------------------------
-                        // DEV JOBS
-                        // -------------------------
-                        if (params.TARGET_ENV == 'dev' || params.TARGET_ENV == 'all') {
-
-                            dsl += """
-pipelineJob("${REPO_NAME}/dev/${job.name}") {
     definition {
-        cps {
-            script(\"\"\"
-${scriptContent}
-\"\"\")
-            sandbox()
+        cpsScm {
+            scm {
+                git {
+                    remote {
+                        url('${repoUrl}')
+                    }
+                    branches('main')
+                }
+            }
+            scriptPath('autogen.groovy')
         }
     }
 }
 """
-                        }
 
-                        // -------------------------
-                        // WORKFLOW JOBS
-                        // -------------------------
-                        if (params.TARGET_ENV == 'workflow' || params.TARGET_ENV == 'all') {
-
-                            dsl += """
-pipelineJob("${REPO_NAME}/workflow/${job.name}") {
-    definition {
-        cps {
-            script(\"\"\"
-${scriptContent}
-\"\"\")
-            sandbox()
+                    jobDsl(
+                        scriptText: dsl,
+                        removedJobAction: 'IGNORE',
+                        removedViewAction: 'IGNORE'
+                    )
+                }
+            }
         }
-    }
-}
-"""
-                        }
-                    }
 
-                    if (dsl?.trim()) {
-                        jobDsl scriptText: dsl,
-                            removedJobAction: 'IGNORE',
-                            removedViewAction: 'IGNORE'
-                    } else {
-                        echo "No jobs generated"
-                    }
+        stage('Trigger First AutoGen Run') {
+            steps {
+                script {
+                    build job: "${params.REPO_NAME}/AutoGen",
+                        parameters: [
+                            string(
+                                name: 'BRANCH',
+                                value: 'main'
+                            ),
+                            string(
+                                name: 'ENV',
+                                value: 'dev'
+                            )
+                        ]
                 }
             }
         }

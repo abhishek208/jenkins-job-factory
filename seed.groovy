@@ -1,20 +1,31 @@
+// ===============================
+// seed.groovy
+// ===============================
+
+@Library('platform-lib') _
+
+import platform.GitHub
+
 pipeline {
     agent any
 
     parameters {
-        string(name: 'REPO_NAME', description: 'Repo name (e.g. sample-service)')
+        string(
+            name: 'REPO_NAME',
+            description: 'GitHub repository name (example: sample-service)'
+        )
     }
 
     stages {
 
-        stage('Validate') {
+        stage('Validate Input') {
             steps {
                 script {
                     if (!params.REPO_NAME?.trim()) {
                         error "REPO_NAME is required"
                     }
 
-                    echo "Bootstrapping repo: ${params.REPO_NAME}"
+                    echo "Bootstrapping repository: ${params.REPO_NAME}"
                 }
             }
         }
@@ -24,54 +35,53 @@ pipeline {
                 script {
 
                     def repo = params.REPO_NAME
+                    def repoUrl = GitHub.repoUrl(repo)
 
                     def dsl = """
 folder('${repo}')
 
 pipelineJob('${repo}/AutoGen') {
+    description('AutoGen job for ${repo}')
+
     definition {
-        cps {
-            script(\"\"\"
-@Library('platform-lib') _
-
-pipeline {
-    agent any
-
-    parameters {
-        string(name: 'BRANCH', defaultValue: 'main')
-    }
-
-    environment {
-        REPO_NAME = "${repo}"
-        REPO_URL  = GitHub.repoUrl("${repo}")
-    }
-
-    stages {
-        stage('Checkout') {
-            steps {
-                git branch: "\${params.BRANCH}", url: "\${REPO_URL}"
+        cpsScm {
+            scm {
+                git {
+                    remote {
+                        url('${repoUrl}')
+                    }
+                    branches('main')
+                }
             }
-        }
-
-        stage('Run AutoGen') {
-            steps {
-                build job: '${repo}/AutoGen-Executor', parameters: [
-                    string(name: 'BRANCH', value: params.BRANCH)
-                ]
-            }
-        }
-    }
-}
-\"\"\")
-            sandbox()
+            scriptPath('autogen.groovy')
         }
     }
 }
 """
 
-                    jobDsl scriptText: dsl,
+                    jobDsl(
+                        scriptText: dsl,
                         removedJobAction: 'IGNORE',
                         removedViewAction: 'IGNORE'
+                    )
+                }
+            }
+        }
+
+        stage('Trigger First AutoGen Run') {
+            steps {
+                script {
+                    build job: "${params.REPO_NAME}/AutoGen",
+                        parameters: [
+                            string(
+                                name: 'BRANCH',
+                                value: 'main'
+                            ),
+                            string(
+                                name: 'ENV',
+                                value: 'dev'
+                            )
+                        ]
                 }
             }
         }
