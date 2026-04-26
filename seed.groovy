@@ -25,16 +25,16 @@ pipeline {
 
                     def repo = params.REPO_NAME
 
-                    // Create folder
-                    jobDsl scriptText: """
+                    // ---------------------------
+                    // Job DSL script (STRING ONLY)
+                    // ---------------------------
+                    def dsl = """
 folder('${repo}')
-"""
 
-                    // Create AutoGen job
-                    pipelineJob("${repo}/AutoGen") {
-                        definition {
-                            cps {
-                                script("""
+pipelineJob('${repo}/AutoGen') {
+    definition {
+        cps {
+            script(\"\"\"
 pipeline {
     agent any
 
@@ -52,11 +52,15 @@ pipeline {
         }
     }
 }
-""")
-                                sandbox()
-                            }
-                        }
-                    }
+\"\"\")
+        }
+    }
+}
+"""
+
+                    jobDsl scriptText: dsl,
+                        removedJobAction: 'IGNORE',
+                        removedViewAction: 'IGNORE'
                 }
             }
         }
