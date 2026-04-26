@@ -1,32 +1,74 @@
-@Library('platform-lib') _
-
-def repoName = REPO_NAME
-
-folder(repoName)
-
-pipelineJob("${repoName}/AutoGen") {
-    description("Auto generator for ${repoName}")
-
-    definition {
-        cps {
-            script("""
 pipeline {
     agent any
 
+    parameters {
+        string(name: 'REPO_NAME', description: 'Enter GitHub repo name')
+    }
+
     stages {
 
-        stage('Run AutoGen') {
+        stage('Validate Input') {
             steps {
                 script {
-                    build job: '${repoName}/AutoGen-Engine'
+                    if (!params.REPO_NAME?.trim()) {
+                        error "REPO_NAME is required"
+                    }
+
+                    echo "Bootstrapping repo: ${params.REPO_NAME}"
                 }
             }
         }
 
+        stage('Create Folder + AutoGen Job') {
+            steps {
+                script {
+
+                    def repo = params.REPO_NAME
+
+                    // Create folder
+                    folder(repo)
+
+                    // Create AutoGen job
+                    pipelineJob("${repo}/AutoGen") {
+                        definition {
+                            cps {
+                                script("""
+pipeline {
+    agent any
+
+    parameters {
+        string(name: 'REPO_NAME', defaultValue: '${repo}')
+    }
+
+    stages {
+        stage('Run AutoGen Engine') {
+            steps {
+                build job: '${repo}/AutoGen-Engine', parameters: [
+                    string(name: 'REPO_NAME', value: '${repo}')
+                ]
+            }
+        }
     }
 }
 """)
-            sandbox()
+                                sandbox()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Trigger AutoGen (first run)') {
+            steps {
+                script {
+                    def repo = params.REPO_NAME
+
+                    build job: "${repo}/AutoGen-Engine", parameters: [
+                        string(name: 'REPO_NAME', value: repo)
+                    ]
+                }
+            }
         }
     }
 }

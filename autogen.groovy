@@ -4,27 +4,36 @@ import platform.GitHub
 pipeline {
     agent any
 
-    environment {
-        REPO_NAME = env.JOB_NAME.split('/')[0]
-        REPO_URL  = GitHub.repoUrl(env.JOB_NAME.split('/')[0])
+    parameters {
+        string(name: 'REPO_NAME', description: 'Repository name')
     }
 
     stages {
 
-        stage('Checkout') {
+        stage('Checkout Repo') {
             steps {
-                git branch: 'main', url: "${REPO_URL}"
+                script {
+
+                    def repo = params.REPO_NAME
+                    def url = GitHub.repoUrl(repo)
+
+                    echo "Cloning repo: ${url}"
+
+                    git branch: 'main', url: url
+                }
             }
         }
 
-        stage('Read Workflow') {
+        stage('Generate Jobs from Workflow') {
             steps {
                 script {
+
+                    def repo = params.REPO_NAME
 
                     def configFile = "automation/workflow.yaml"
 
                     if (!fileExists(configFile)) {
-                        error "workflow.yaml not found"
+                        error "workflow.yaml not found in repo"
                     }
 
                     def config = readYaml file: configFile
@@ -36,46 +45,43 @@ pipeline {
                         def jfFile = "automation/${job.file}"
 
                         if (!fileExists(jfFile)) {
-                            echo "Skipping ${job.name}"
+                            echo "Skipping ${job.name}, file not found"
                             continue
                         }
 
                         def scriptContent = readFile(jfFile)
 
-                        // 🔥 DEV FOLDER JOB
+                        // 🔥 DEV JOBS
                         dsl += """
-pipelineJob("${REPO_NAME}/dev/${job.name}") {
+pipelineJob("${repo}/dev/${job.name}") {
     definition {
         cps {
-            script(\"\"\"
-${scriptContent}
-\"\"\")
+            script(\"\"\"${scriptContent}\"\"\")
             sandbox()
         }
     }
 }
 """
 
-                        // 🔥 WORKFLOW FOLDER JOB
+                        // 🔥 WORKFLOW JOBS
                         dsl += """
-pipelineJob("${REPO_NAME}/workflow/${job.name}") {
+pipelineJob("${repo}/workflow/${job.name}") {
     definition {
         cps {
-            script(\"\"\"
-${scriptContent}
-\"\"\")
+            script(\"\"\"${scriptContent}\"\"\")
             sandbox()
         }
     }
 }
 """
-
                     }
 
                     if (dsl.trim()) {
                         jobDsl scriptText: dsl,
                             removedJobAction: 'DELETE',
                             removedViewAction: 'IGNORE'
+                    } else {
+                        echo "No jobs generated from workflow.yaml"
                     }
                 }
             }
