@@ -1,7 +1,3 @@
-// ===============================
-// seed.groovy
-// ===============================
-
 @Library('platform-lib') _
 
 import platform.GitHub
@@ -12,77 +8,51 @@ pipeline {
     parameters {
         string(
             name: 'REPO_NAME',
-            description: 'GitHub repository name (example: sample-service)'
+            description: 'Repository name'
         )
     }
 
     stages {
 
-        stage('Validate Input') {
+        stage('Validate') {
             steps {
                 script {
                     if (!params.REPO_NAME?.trim()) {
                         error "REPO_NAME is required"
                     }
 
-                    echo "Bootstrapping repository: ${params.REPO_NAME}"
+                    echo "Creating jobs for: ${params.REPO_NAME}"
                 }
             }
         }
 
-        stage('Create Folder + AutoGen Job') {
+        stage('Run Job DSL') {
             steps {
                 script {
 
                     def repo = params.REPO_NAME
                     def repoUrl = GitHub.repoUrl(repo)
 
-                    def dsl = """
-folder('${repo}')
-
-pipelineJob('${repo}/AutoGen') {
-    description('AutoGen job for ${repo}')
-
-    definition {
-        cpsScm {
-            scm {
-                git {
-                    remote {
-                        url('${repoUrl}')
-                    }
-                    branches('main')
-                }
-            }
-            scriptPath('autogen.groovy')
-        }
-    }
-}
-"""
-
                     jobDsl(
-                        scriptText: dsl,
+                        targets: 'jobs/createJobs.groovy',
                         removedJobAction: 'IGNORE',
-                        removedViewAction: 'IGNORE'
+                        removedViewAction: 'IGNORE',
+                        additionalParameters: [
+                            REPO_NAME: repo,
+                            REPO_URL : repoUrl
+                        ]
                     )
                 }
             }
         }
 
-        stage('Trigger First AutoGen Run') {
+        stage('Trigger AutoGen') {
             steps {
-                script {
-                    build job: "${params.REPO_NAME}/AutoGen",
-                        parameters: [
-                            string(
-                                name: 'BRANCH',
-                                value: 'main'
-                            ),
-                            string(
-                                name: 'ENV',
-                                value: 'dev'
-                            )
-                        ]
-                }
+                build job: "${params.REPO_NAME}/AutoGen",
+                    parameters: [
+                        string(name: 'BRANCH', value: 'main'),
+                        string(name: 'ENV', value: 'dev')
+                    ]
             }
         }
     }

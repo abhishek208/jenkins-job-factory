@@ -1,5 +1,5 @@
 // ===============================
-// seed.groovy
+// autogen.groovy
 // ===============================
 
 @Library('platform-lib') _
@@ -11,77 +11,101 @@ pipeline {
 
     parameters {
         string(
-            name: 'REPO_NAME',
-            description: 'GitHub repository name (example: sample-service)'
+            name: 'BRANCH',
+            defaultValue: 'main',
+            description: 'Branch to checkout'
         )
+
+        choice(
+            name: 'ENV',
+            choices: ['dev', 'workflow'],
+            description: 'Environment for job generation'
+        )
+    }
+
+    environment {
+        // Example:
+        // JOB_NAME = sample-service/AutoGen
+        // REPO_NAME = sample-service
+        REPO_NAME = "${env.JOB_NAME.split('/')[0]}"
+        REPO_URL  = "${GitHub.repoUrl(env.JOB_NAME.split('/')[0])}"
     }
 
     stages {
 
-        stage('Validate Input') {
+        stage('Init') {
             steps {
                 script {
-                    if (!params.REPO_NAME?.trim()) {
-                        error "REPO_NAME is required"
-                    }
-
-                    echo "Bootstrapping repository: ${params.REPO_NAME}"
+                    echo "Repo Name : ${env.REPO_NAME}"
+                    echo "Repo URL  : ${env.REPO_URL}"
+                    echo "Branch    : ${params.BRANCH}"
+                    echo "ENV       : ${params.ENV}"
                 }
             }
         }
 
-        stage('Create Folder + AutoGen Job') {
+        stage('Checkout Repository') {
+            steps {
+                git(
+                    branch: "${params.BRANCH}",
+                    url: "${env.REPO_URL}"
+                )
+            }
+        }
+
+        stage('Validate workflow.yaml') {
+            steps {
+                script {
+                    def workflowFile = "automation/workflow.yaml"
+
+                    if (!fileExists(workflowFile)) {
+                        error "workflow.yaml not found at ${workflowFile}"
+                    }
+
+                    echo "workflow.yaml found"
+                }
+            }
+        }
+
+        stage('Generate Jobs') {
             steps {
                 script {
 
-                    def repo = params.REPO_NAME
-                    def repoUrl = GitHub.repoUrl(repo)
-
-                    def dsl = """
-folder('${repo}')
-
-pipelineJob('${repo}/AutoGen') {
-    description('AutoGen job for ${repo}')
-
-    definition {
-        cpsScm {
-            scm {
-                git {
-                    remote {
-                        url('${repoUrl}')
-                    }
-                    branches('main')
-                }
-            }
-            scriptPath('autogen.groovy')
-        }
-    }
-}
-"""
-
-                    jobDsl(
-                        scriptText: dsl,
-                        removedJobAction: 'IGNORE',
-                        removedViewAction: 'IGNORE'
+                    def config = readYaml(
+                        file: 'automation/workflow.yaml'
                     )
-                }
-            }
-        }
 
-        stage('Trigger First AutoGen Run') {
-            steps {
-                script {
-                    build job: "${params.REPO_NAME}/AutoGen",
-                        parameters: [
-                            string(
-                                name: 'BRANCH',
-                                value: 'main'
-                            ),
-                            string(
-                                name: 'ENV',
-                                value: 'dev'
-                            )
-                        ]
+                    for (job in config.jobs) {
+
+                        // Skip jobs not matching selected ENV
+                        if (job.env && job.env != params.ENV) {
+                            echo "Skipping ${job.name} for ENV=${params.ENV}"
+                            continue
+                        }
+
+                        def jobFile = "automation/${job.file}"
+
+                        if (!fileExists(jobFile)) {
+                            echo "Missing file: ${jobFile}"
+                            continue
+                        }
+
+                        def pipelineScript = readFile(jobFile)
+
+                        jobDsl(
+                            targets: 'jobs/generatedJobs.groovy',
+                            removedJobAction: 'IGNORE',
+                            removedViewAction: 'IGNORE',
+                            additionalParameters: [
+                                REPO_NAME      : env.REPO_NAME,
+                                ENV            : params.ENV,
+                                JOB_NAME       : job.name,
+                                PIPELINE_SCRIPT: pipelineScript
+                            ]
+                        )
+                    }
+
+                    echo "Job generation completed for ENV=${params.ENV}"
                 }
             }
         }
