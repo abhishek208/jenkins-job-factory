@@ -2,12 +2,12 @@ pipeline {
     agent any
 
     parameters {
-        string(name: 'REPO_NAME', description: 'Enter GitHub repo name')
+        string(name: 'REPO_NAME', description: 'Repo name (e.g. sample-service)')
     }
 
     stages {
 
-        stage('Validate Input') {
+        stage('Validate') {
             steps {
                 script {
                     if (!params.REPO_NAME?.trim()) {
@@ -25,9 +25,6 @@ pipeline {
 
                     def repo = params.REPO_NAME
 
-                    // ---------------------------
-                    // Job DSL script (STRING ONLY)
-                    // ---------------------------
                     def dsl = """
 folder('${repo}')
 
@@ -35,24 +32,38 @@ pipelineJob('${repo}/AutoGen') {
     definition {
         cps {
             script(\"\"\"
+@Library('platform-lib') _
+
 pipeline {
     agent any
 
     parameters {
-        string(name: 'REPO_NAME', defaultValue: '${repo}')
+        string(name: 'BRANCH', defaultValue: 'main')
+    }
+
+    environment {
+        REPO_NAME = "${repo}"
+        REPO_URL  = GitHub.repoUrl("${repo}")
     }
 
     stages {
-        stage('Run AutoGen Engine') {
+        stage('Checkout') {
             steps {
-                build job: '${repo}/AutoGen', parameters: [
-                    string(name: 'REPO_NAME', value: '${repo}')
+                git branch: "\${params.BRANCH}", url: "\${REPO_URL}"
+            }
+        }
+
+        stage('Run AutoGen') {
+            steps {
+                build job: '${repo}/AutoGen-Executor', parameters: [
+                    string(name: 'BRANCH', value: params.BRANCH)
                 ]
             }
         }
     }
 }
 \"\"\")
+            sandbox()
         }
     }
 }
@@ -61,18 +72,6 @@ pipeline {
                     jobDsl scriptText: dsl,
                         removedJobAction: 'IGNORE',
                         removedViewAction: 'IGNORE'
-                }
-            }
-        }
-
-        stage('Trigger AutoGen (first run)') {
-            steps {
-                script {
-                    def repo = params.REPO_NAME
-
-                    build job: "${repo}/AutoGen", parameters: [
-                        string(name: 'REPO_NAME', value: repo)
-                    ]
                 }
             }
         }

@@ -6,28 +6,18 @@ pipeline {
     agent any
 
     parameters {
-        string(name: 'BRANCH', defaultValue: 'main', description: 'Branch to build')
+        string(name: 'BRANCH', defaultValue: 'main')
+        choice(name: 'TARGET_ENV', choices: ['dev', 'workflow', 'all'], description: 'Which env to generate')
     }
 
     environment {
-        // repo name derived from Seed-created structure
         REPO_NAME = "${env.JOB_NAME.split('/')[0]}"
         REPO_URL  = GitHub.repoUrl("${env.JOB_NAME.split('/')[0]}")
     }
 
     stages {
 
-        stage('Init') {
-            steps {
-                script {
-                    echo "Repo Name: ${REPO_NAME}"
-                    echo "Repo URL: ${REPO_URL}"
-                    echo "Branch: ${params.BRANCH}"
-                }
-            }
-        }
-
-        stage('Checkout Repo') {
+        stage('Checkout') {
             steps {
                 git branch: "${params.BRANCH}", url: "${REPO_URL}"
             }
@@ -36,13 +26,9 @@ pipeline {
         stage('Validate Workflow') {
             steps {
                 script {
-                    def wf = "automation/workflow.yaml"
-
-                    if (!fileExists(wf)) {
+                    if (!fileExists("automation/workflow.yaml")) {
                         error "workflow.yaml not found"
                     }
-
-                    echo "workflow.yaml found"
                 }
             }
         }
@@ -55,52 +41,62 @@ pipeline {
 
                     def dsl = ""
 
-                    for (job in config.jobs) {
+                    config.jobs.each { job ->
 
-                        def jfFile = "automation/${job.file}"
+                        def scriptFile = "automation/${job.file}"
 
-                        if (!fileExists(jfFile)) {
-                            echo "Skipping ${job.name}, missing ${jfFile}"
-                            continue
+                        if (!fileExists(scriptFile)) {
+                            echo "Skipping ${job.name}"
+                            return
                         }
 
-                        def pipelineScript = readFile(jfFile)
+                        def scriptContent = readFile(scriptFile)
 
-                        // 🔵 DEV JOBS
-                        dsl += """
+                        // -------------------------
+                        // DEV JOBS
+                        // -------------------------
+                        if (params.TARGET_ENV == 'dev' || params.TARGET_ENV == 'all') {
+
+                            dsl += """
 pipelineJob("${REPO_NAME}/dev/${job.name}") {
     definition {
         cps {
             script(\"\"\"
-${pipelineScript}
+${scriptContent}
 \"\"\")
             sandbox()
         }
     }
 }
 """
+                        }
 
-                        // 🔵 WORKFLOW JOBS
-                        dsl += """
+                        // -------------------------
+                        // WORKFLOW JOBS
+                        // -------------------------
+                        if (params.TARGET_ENV == 'workflow' || params.TARGET_ENV == 'all') {
+
+                            dsl += """
 pipelineJob("${REPO_NAME}/workflow/${job.name}") {
     definition {
         cps {
             script(\"\"\"
-${pipelineScript}
+${scriptContent}
 \"\"\")
             sandbox()
         }
     }
 }
 """
+                        }
                     }
 
                     if (dsl?.trim()) {
                         jobDsl scriptText: dsl,
-                            removedJobAction: 'DELETE',
+                            removedJobAction: 'IGNORE',
                             removedViewAction: 'IGNORE'
                     } else {
-                        echo "No jobs generated from workflow.yaml"
+                        echo "No jobs generated"
                     }
                 }
             }
