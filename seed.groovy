@@ -45,7 +45,7 @@ pipeline {
     stages {
         stage('Run AutoGen Engine') {
             steps {
-                build job: '${repo}/AutoGen-Engine', parameters: [
+                build job: '${repo}/AutoGen', parameters: [
                     string(name: 'REPO_NAME', value: '${repo}')
                 ]
             }
@@ -70,7 +70,7 @@ pipeline {
                 script {
                     def repo = params.REPO_NAME
 
-                    build job: "${repo}/AutoGen-Engine", parameters: [
+                    build job: "${repo}/AutoGen", parameters: [
                         string(name: 'REPO_NAME', value: repo)
                     ]
                 }
