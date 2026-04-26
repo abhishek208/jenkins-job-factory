@@ -1,42 +1,57 @@
 @Library('platform-lib') _
+
 import platform.GitHub
 
 pipeline {
     agent any
 
     parameters {
-        string(name: 'REPO_NAME', description: 'Repository name')
+        string(name: 'BRANCH', defaultValue: 'main', description: 'Branch to build')
+    }
+
+    environment {
+        // repo name derived from Seed-created structure
+        REPO_NAME = "${env.JOB_NAME.split('/')[0]}"
+        REPO_URL  = GitHub.repoUrl("${env.JOB_NAME.split('/')[0]}")
     }
 
     stages {
 
-        stage('Checkout Repo') {
+        stage('Init') {
             steps {
                 script {
-
-                    def repo = params.REPO_NAME
-                    def url = GitHub.repoUrl(repo)
-
-                    echo "Cloning repo: ${url}"
-
-                    git branch: 'main', url: url
+                    echo "Repo Name: ${REPO_NAME}"
+                    echo "Repo URL: ${REPO_URL}"
+                    echo "Branch: ${params.BRANCH}"
                 }
             }
         }
 
-        stage('Generate Jobs from Workflow') {
+        stage('Checkout Repo') {
+            steps {
+                git branch: "${params.BRANCH}", url: "${REPO_URL}"
+            }
+        }
+
+        stage('Validate Workflow') {
+            steps {
+                script {
+                    def wf = "automation/workflow.yaml"
+
+                    if (!fileExists(wf)) {
+                        error "workflow.yaml not found"
+                    }
+
+                    echo "workflow.yaml found"
+                }
+            }
+        }
+
+        stage('Generate Jobs') {
             steps {
                 script {
 
-                    def repo = params.REPO_NAME
-
-                    def configFile = "automation/workflow.yaml"
-
-                    if (!fileExists(configFile)) {
-                        error "workflow.yaml not found in repo"
-                    }
-
-                    def config = readYaml file: configFile
+                    def config = readYaml file: 'automation/workflow.yaml'
 
                     def dsl = ""
 
@@ -45,30 +60,34 @@ pipeline {
                         def jfFile = "automation/${job.file}"
 
                         if (!fileExists(jfFile)) {
-                            echo "Skipping ${job.name}, file not found"
+                            echo "Skipping ${job.name}, missing ${jfFile}"
                             continue
                         }
 
-                        def scriptContent = readFile(jfFile)
+                        def pipelineScript = readFile(jfFile)
 
-                        // 🔥 DEV JOBS
+                        // 🔵 DEV JOBS
                         dsl += """
-pipelineJob("${repo}/dev/${job.name}") {
+pipelineJob("${REPO_NAME}/dev/${job.name}") {
     definition {
         cps {
-            script(\"\"\"${scriptContent}\"\"\")
+            script(\"\"\"
+${pipelineScript}
+\"\"\")
             sandbox()
         }
     }
 }
 """
 
-                        // 🔥 WORKFLOW JOBS
+                        // 🔵 WORKFLOW JOBS
                         dsl += """
-pipelineJob("${repo}/workflow/${job.name}") {
+pipelineJob("${REPO_NAME}/workflow/${job.name}") {
     definition {
         cps {
-            script(\"\"\"${scriptContent}\"\"\")
+            script(\"\"\"
+${pipelineScript}
+\"\"\")
             sandbox()
         }
     }
@@ -76,7 +95,7 @@ pipelineJob("${repo}/workflow/${job.name}") {
 """
                     }
 
-                    if (dsl.trim()) {
+                    if (dsl?.trim()) {
                         jobDsl scriptText: dsl,
                             removedJobAction: 'DELETE',
                             removedViewAction: 'IGNORE'

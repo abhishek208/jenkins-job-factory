@@ -26,7 +26,9 @@ pipeline {
                     def repo = params.REPO_NAME
 
                     // Create folder
-                    folder(repo)
+                    jobDsl scriptText: """
+folder('${repo}')
+"""
 
                     // Create AutoGen job
                     pipelineJob("${repo}/AutoGen") {
