@@ -8,7 +8,7 @@ pipelineJob("${REPO_NAME}/AutoGen") {
             scm {
                 git {
                     remote {
-                        url("${REPO_URL}")
+                        url("https://github.com/abhishek208/jenkins-job-factory.git")
                     }
                     branches("main")
                 }
