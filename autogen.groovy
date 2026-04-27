@@ -5,6 +5,7 @@
 @Library('platform-lib') _
 
 import platform.GitHub
+import platform.JobFactory
 
 pipeline {
     agent any
@@ -24,11 +25,9 @@ pipeline {
     }
 
     environment {
-        // Example:
-        // JOB_NAME = sample-service/AutoGen
-        // REPO_NAME = sample-service
-        REPO_NAME = "${env.JOB_NAME.split('/')[0]}"
-        REPO_URL  = "${GitHub.repoUrl(env.JOB_NAME.split('/')[0])}"
+        REPO_NAME        = "${env.JOB_NAME.split('/')[0]}"
+        REPO_URL         = "${GitHub.repoUrl(env.JOB_NAME.split('/')[0])}"
+        JOB_FACTORY_URL  = "${JobFactory.repoUrl()}"
     }
 
     stages {
@@ -36,10 +35,11 @@ pipeline {
         stage('Init') {
             steps {
                 script {
-                    echo "Repo Name : ${env.REPO_NAME}"
-                    echo "Repo URL  : ${env.REPO_URL}"
-                    echo "Branch    : ${params.BRANCH}"
-                    echo "ENV       : ${params.ENV}"
+                    echo "Repo Name        : ${env.REPO_NAME}"
+                    echo "Repo URL         : ${env.REPO_URL}"
+                    echo "Job Factory URL  : ${env.JOB_FACTORY_URL}"
+                    echo "Branch           : ${params.BRANCH}"
+                    echo "ENV              : ${params.ENV}"
                 }
             }
         }
@@ -50,6 +50,17 @@ pipeline {
                     branch: "${params.BRANCH}",
                     url: "${env.REPO_URL}"
                 )
+            }
+        }
+
+        stage('Checkout Job Factory') {
+            steps {
+                dir('job-factory') {
+                    git(
+                        branch: 'main',
+                        url: "${env.JOB_FACTORY_URL}"
+                    )
+                }
             }
         }
 
@@ -77,7 +88,6 @@ pipeline {
 
                     for (job in config.jobs) {
 
-                        // Skip jobs not matching selected ENV
                         if (job.env && job.env != params.ENV) {
                             echo "Skipping ${job.name} for ENV=${params.ENV}"
                             continue
@@ -93,7 +103,7 @@ pipeline {
                         def pipelineScript = readFile(jobFile)
 
                         jobDsl(
-                            targets: 'jobs/generatedJobs.groovy',
+                            targets: 'job-factory/jobs/generatedJobs.groovy',
                             removedJobAction: 'IGNORE',
                             removedViewAction: 'IGNORE',
                             additionalParameters: [
